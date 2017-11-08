@@ -5,6 +5,7 @@ import scipy.misc
 import numpy as np
 import logging, time, os
 import cv2
+from _openssl import *
 
 class communication(Factory):
     matrix = None
@@ -39,7 +40,8 @@ class communication(Factory):
         for client in self.clients:
             client.image = open("plate.jpg",'wb')
             client.isdownloading = True
-            client.transport.write("shoot:"+compression+":0:0:0:0")
+            temp_string = 'shoot:'+compression+':0:0:0:0'
+            client.transport.write(temp_string.encode('ascii'))
             while client.isdownloading :
                 time.sleep(0.1)
             client.image.close()
@@ -48,6 +50,16 @@ class communication(Factory):
         img = cv2.imread("plate.jpg")
         cv2.imwrite("./modules/plate/resources/image/plate.jpg",img)
         return img
+
+    def getInitPos(self):
+        for client in self.clients:
+            client.homelocation = None
+            # client.transport.protocol.write(b'getp:0:0:0:0:0')
+            client.transport.write('getp:0:0:0:0:0'.encode('ascii'))
+            # while not client.homelocation: time.sleep(0.1)
+            pos = client.homelocation
+        # return pos
+        return [0.0,0.0,0.0]
 
     # wait until position is returned (here you need to give value to pos)
     def getPos(self):
@@ -63,7 +75,7 @@ class communication(Factory):
             pos = client.homelocation
 
         pos = self.matrix.I*pos
-        return None
+        return pos
 
     # check whether the communication is usable
     def checkComm(self):
@@ -72,6 +84,8 @@ class communication(Factory):
         else:
             return True
 
+    def setLog(self,log):
+        self.log = log
     def takeoff(self):
         for client in self.clients:
             client.transport.write("takeoff:0:0:0:0:0")
@@ -104,12 +118,9 @@ class communication(Factory):
         assert (matrix is not None)
         self.matrix = matrix
 
-    def setLog(self, log):
-        self.log = log
-
 
 class communication_client(Protocol):
-    def __init__(self, factory, log):
+    def __init__(self, factory, log=None):
         self.factory = factory
         self.images = {}
         self.image = None
@@ -127,20 +138,23 @@ class communication_client(Protocol):
         self.log.info('Client has been removed')
 
     def dataReceived(self, data):
+        print(data)
         if (not self.isdownloading):
             clean_data = data.strip()
-            clean_data = clean_data.split(":", 2)
-            if (len(clean_data) == 3):
+            clean_data = clean_data.decode('ascii')
+            clean_data = clean_data.split(':', 3)
+            if (len(clean_data) == 4):
                 Type = clean_data[0]
                 Name = clean_data[1]
                 Content = clean_data[2]
+                content2 = clean_data[3]
                 if Type == "iam":
                     self.name = Name
                     msg = self.name + " has joined"
                 elif Type == "msg":
                     msg = self.name + ": " + Name + "\n" + Content
                 elif Type == "pos":
-                    self.homelocation = [float(Name), float(Content)]
+                    self.homelocation = [float(Name), float(Content), float(content2)]
                 elif Type == "cmd":
                     if Name == "close":
                         if Content in self.images:
@@ -149,7 +163,7 @@ class communication_client(Protocol):
                     	self.iswping = False
         else:
             data = data.strip()
-            if (data[-6:] == "finish"):
+            if (data[-6:] == "finish".encode('ascii')):
                 self.image.write(data[:-6])
                 self.isdownloading = False
             else:
