@@ -42,6 +42,7 @@ class communication(Factory):
             client.isdownloading = True
             temp_string = 'shoot:'+compression+':0:0:0:0'
             client.transport.write(temp_string.encode('ascii'))
+            time.sleep(2.0)
             while client.isdownloading :
                 time.sleep(0.1)
             client.image.close()
@@ -124,7 +125,7 @@ class communication_client(Protocol):
         self.factory = factory
         self.images = {}
         self.image = None
-        self.homelocation = None
+        self.homelocation = []
         self.isdownloading = False
         self.iswping = False
         self.log = log
@@ -154,7 +155,7 @@ class communication_client(Protocol):
                 elif Type == "msg":
                     msg = self.name + ": " + Name + "\n" + Content
                 elif Type == "pos":
-                    self.homelocation = [float(Name), float(Content), float(content2)]
+                    self.homelocation.append([float(Name), float(Content), float(content2)])
                 elif Type == "cmd":
                     if Name == "close":
                         if Content in self.images:

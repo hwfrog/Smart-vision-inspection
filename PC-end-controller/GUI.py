@@ -168,6 +168,7 @@ class GUI(Frame):
 
     CORNER = [0,0,0,0]
     CORNER_NAME = ['LF','RF','RB','LB']
+    homelocation = []
     def readCommand(self):
         temp = self.command.get('1.0', END)
         try:
@@ -191,7 +192,7 @@ class GUI(Frame):
                 for client in self.UAV.comm.clients:
                     temp_string = 'pos:'+temp[0]+':0:0:0:0'
                     client.transport.write(temp_string.encode('ascii'))
-                if sum(self.CORNER)==4:self.log.info('All four corners have been recorded.')
+                    time.sleep(1.0)
             else:
                 self.messageInfo = temp
 

@@ -60,28 +60,26 @@ class UAV:
         self.log.info('Please put UAV at four anchor point: ')
         self.log.info('Need at least one at earth and one at 1M height')
         pos = homelocation
-
+        '''
         y_min, y_max = 1e+3, -1e+3
         for i in range(4):
             y_min, y_max = min([y_min, HOLD_RATE*pos[i][1]]), max([y_max, HOLD_RATE*pos[i][1]])
+        self.MATRIX[1, 1] = 1.0 * SR_HEIGHT / max([1e-2, (y_max - y_min)])
+        self.MATRIX[1, 3] = -y_min * SR_HEIGHT / max([1e-2, (y_max - y_min)])  # matrix for height
+        '''
+        dx0, dz0 = pos[0][0] - pos[3][0], pos[0][2] - pos[3][2]
+        dx2, dz2 = pos[2][0] - pos[3][0], pos[2][2] - pos[3][2]
 
-        self.MATRIX[1, 1] = 1.0 * SR_HEIGHT / max([1e-2,(y_max - y_min)])
-        self.MATRIX[1, 3] = -y_min * SR_HEIGHT / max([1e-2,(y_max - y_min)])  # matrix for height
-
-        dx, dz = pos[0][0] - pos[3][0], pos[0][3] - pos[3][3]
-        k = SR_LENGTH / math.sqrt(dx ** 2 + dz ** 2)
         self.MATRIX[0, 0], self.MATRIX[0, 2], self.MATRIX[0, 3] = \
-            dx * k, dz * k, -pos[3][0] * dx * k - pos[3][3] * dz * k
-
-        dx, dz = pos[2][0] - pos[3][0], pos[2][3] - pos[3][3]
-        k = SR_WIDTH / math.sqrt(dx ** 2 + dz ** 2)
+            dx0 / SR_LENGTH, dx2 / SR_WIDTH, dx2 / 2 + pos[3][0]
         self.MATRIX[2, 0], self.MATRIX[2, 2], self.MATRIX[2, 3] = \
-            dx * k, dz * k, -pos[3][0] * dx * k - pos[3][3] * dz * k
+            dz0 / SR_LENGTH, dz2 / SR_WIDTH, dz2 / 2 + pos[3][2]
 
         self.MATRIX = np.mat(self.MATRIX)
         if self.MATRIX.I is None:
             self.log.error('The anchored matrix has no reverse matrix')
         self.log.info("UAV coordinate system has been anchored!")
+        self.comm.setMatrix(self.MATRIX)
 
     def listenBegin(self, args=None):
         self.comm.clients = []
@@ -147,6 +145,8 @@ class UAV:
                 # blocked until there exists inqueue features
                 pos = self.region.reach(feature.region.tar_pos)
                 angle = self.camera.reach(feature.camera.angle)
+                pos = [1.0,3.0,0.0]
+                angle = 45.0
                 arrive = self.comm.waitMove(pos, angle, "UAV is approaching targeted position!")
                 if arrive:
                     self.region.setCenter(pos)
@@ -208,6 +208,11 @@ class UAV:
     # thread center used to control each mode to restart or terminate
     def modeCenter(self, args=None):
         while True:
+            if sum(self.gui.CORNER) == 4:
+                time.sleep(1.0)
+                self.anchorMatrix(self.comm.clients[0].homelocation)
+                self.log.info('All four corners have been recorded.')
+                self.gui.CORNER = 0
             if self.gui.suspend is True:
                 # suspend the plane
                 if self.visitList[self.MODE].isAlive():
@@ -240,13 +245,32 @@ class UAV:
 
 
 if __name__ == '__main__':
-    uav = UAV()
-    # reactor.run()
+    # uav = UAV()
     '''
-    comm = Communicate.communication()
-    comm.clients = []
-    reactor.listenTCP(80, comm)
-    reactor.run()
-    print()
+    pos = [[],[],[],[]]
+    pos[0]=[3442395.688885,3.500000,13473033.072347]
+    pos[1]=[3442397.485786,3.700000,13473038.478324]
+    pos[2]=[3442389.651855,3.500000,13473041.002093]
+    pos[3]=[3442387.669069,3.700000,13473036.477345]
+    MATRIX = np.eye(4)
+    y_min, y_max = 1e+3, -1e+3
+    for i in range(4):
+        y_min, y_max = min([y_min, HOLD_RATE * pos[i][1]]), max([y_max, HOLD_RATE * pos[i][1]])
+
+    MATRIX[1, 1] = 1.0 * SR_HEIGHT / max([1e-2, (y_max - y_min)])
+    MATRIX[1, 3] = -y_min * SR_HEIGHT / max([1e-2, (y_max - y_min)])  # matrix for height
+
+    dx0, dz0 = pos[0][0] - pos[3][0], pos[0][2] - pos[3][2]
+    dx2, dz2 = pos[2][0] - pos[3][0], pos[2][2] - pos[3][2]
+
+    MATRIX[0, 0], MATRIX[0, 2], MATRIX[0, 3] = \
+        dx0 / SR_LENGTH, dx2 / SR_WIDTH, dx2 / 2 + pos[3][0]
+    MATRIX[2, 0], MATRIX[2, 2], MATRIX[2, 3] = \
+        dz0 / SR_LENGTH, dz2 / SR_WIDTH, dz2 / 2 + pos[3][2]
+
+    MATRIX = np.mat(MATRIX)
+    pos = [[4.0],[1.0],[0.0],[1.0]]
+    results = MATRIX*pos
+    print(results)
     '''
 
