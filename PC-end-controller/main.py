@@ -3,7 +3,7 @@ from flex_thread import Thread
 from twisted.internet import reactor, tksupport
 from threading import Lock
 import Region, Camera, Communicate, loginfo, GUI
-import time, math
+import time, math, cv2
 import numpy as np
 from parameters import *
 
@@ -55,18 +55,19 @@ class UAV:
         self.gui.processInfo()
 
     # fix: input LF, RF, RB, LB, and FINISHANCHOR to end
-    def anchorMatrix(self,homelocation):
-        assert (self.comm.checkComm())
+    def anchorMatrix(self):
+        # assert (self.comm.checkComm())
         self.log.info('Please put UAV at four anchor point: ')
         self.log.info('Need at least one at earth and one at 1M height')
+        homelocation = self.comm.clients[0].homelocation
+        '''
+        homelocation = [
+            [3442390.962775,7.100000,13473049.827100],
+            [3442386.571666,7.300000,13473054.160324],
+            [3442383.687167,2.700000,13473044.368006],
+            [3442387.200889,2.600000,13473042.405330]]
+        '''
         pos = homelocation
-        '''
-        y_min, y_max = 1e+3, -1e+3
-        for i in range(4):
-            y_min, y_max = min([y_min, HOLD_RATE*pos[i][1]]), max([y_max, HOLD_RATE*pos[i][1]])
-        self.MATRIX[1, 1] = 1.0 * SR_HEIGHT / max([1e-2, (y_max - y_min)])
-        self.MATRIX[1, 3] = -y_min * SR_HEIGHT / max([1e-2, (y_max - y_min)])  # matrix for height
-        '''
         dx0, dz0 = pos[0][0] - pos[3][0], pos[0][2] - pos[3][2]
         dx2, dz2 = pos[2][0] - pos[3][0], pos[2][2] - pos[3][2]
 
@@ -79,7 +80,7 @@ class UAV:
         if self.MATRIX.I is None:
             self.log.error('The anchored matrix has no reverse matrix')
         self.log.info("UAV coordinate system has been anchored!")
-        self.comm.setMatrix(self.MATRIX)
+        self.comm.setMatrix(self.MATRIX, self)
 
     def listenBegin(self, args=None):
         self.comm.clients = []
@@ -127,7 +128,7 @@ class UAV:
             if arrive:
                 self.region.setCenter(pos)
                 self.camera.setCenter(angle)
-            image = self.comm.waitImage()
+            image = self.comm.waitImage(COMPRESS)
             self.gui.showImage(image, "default")
 
     # if feature was detected in queue and run search mode
@@ -138,51 +139,67 @@ class UAV:
             while len(self.gui.feature_queue) == 0: time.sleep(0.1)
             feature = self.gui.feature_queue.pop(-1)
             self.log.info("New feature " + feature.name + " asks for detection!")
+
+            if self.MATRIX is None:
+                self.log.info("Matrix has not been initialized!")
+                return
+            if len(self.comm.clients) == 0:
+                self.log.info("Lost connection with UAV; please check the connection")
+                return
+            # current_position = self.MATRIX.I*self.comm.getPos()
+            # self.region.setCenter(current_position)
             self.region.setTarget(feature.region.tar_pos)
             self.camera.setTarget(feature.camera.tar_angle)
+
             while self.MODE == SEARCH:
                 while self.gui.pause: time.sleep(0.1)
                 # blocked until there exists inqueue features
-                pos = self.region.reach(feature.region.tar_pos)
-                angle = self.camera.reach(feature.camera.angle)
-                pos = [1.0,3.0,0.0]
-                angle = 45.0
-                arrive = self.comm.waitMove(pos, angle, "UAV is approaching targeted position!")
-                if arrive:
-                    self.region.setCenter(pos)
-                    self.camera.setCenter(angle)
+                while True:
+                    pos = self.region.reach(feature.region.tar_pos)
+                    angle = self.camera.reach(feature.camera.angle)
+
+                    arrive = self.comm.waitMove(pos, angle, "UAV is approaching targeted position!")
+                    if arrive:
+                        self.region.setCenter(pos)
+                        self.camera.setCenter(angle)
+                    if pos == feature.region.tar_pos: break
 
                 self.log.info("UAV has arrived at feature target location")
-                image = self.comm.waitImage('0.5')
+                image = self.comm.waitImage(COMPRESS)
+                self.gui.centerImageQueue.append(image)
                 ret = feature.img_pipe(image)  # this is the return info (format see Feature.py)
-                if ret.exist:
-                    while self.MODE == SEARCH and ret.ideal is False:
+                allcount = 0
+                if ret.exist is True:
+                    while self.MODE == SEARCH and ret.ideal is False and allcount<2:
                         # decipher image information with return_info
+                        allcount += 1
                         self.log.info('Correcting the position...')
                         reachInfo = feature.translate(image, ret, self.region, self.camera)
                         self.region.setTarget(reachInfo[0])
                         self.camera.setTarget(reachInfo[1])
                         pos = self.region.reach()
-                        angle = self.camera.reach()
-                        arrive = self.comm.waitMove(pos, angle,
-                                                    "Search mode is adjust position for feature " + feature.name)
+                        angle = self.camera.reach(angle)
+                        arrive = self.comm.waitMove(pos, angle, \
+                                                    "Search mode is adjusting position for feature " \
+                                                    + feature.name)
                         if arrive:
                             self.region.setCenter(pos)
                             self.camera.setCenter(angle)
 
-                        image = self.comm.waitImage()
+                        image = self.comm.waitImage(COMPRESS)
+                        self.gui.centerImageQueue.append(image)
                         # recheck the result until ideal
                         ret = feature.img_pipe(image)
-                        self.gui.showImage(ret.image, feature.name)
 
+                    self.gui.imageQueue.append([ret.image, feature.name])
                     self.log.info("The situation is ideal. Further process is being executed.")
                     feature.postprocess(image)  # post process like storage or else
                     break  # wait for next feature coming in
                 else:
                     self.log.info("No feature of " + feature.name + " is detected in current region.")
                     self.log.info("Please input specified new region to overwrite preset region.")
-                    region = self.executeCommand()
-                    feature.region.setTarget(region)
+                    # region = self.executeCommand()
+                    # feature.region.setTarget(ret.region)
 
     # used for early debug as well as reach the position when no detect in target position
     def debugMode(self, args=None):  # abandom access to MODE
@@ -197,22 +214,29 @@ class UAV:
                 self.gui.messageInfo = ''
                 lock.release()
 
-                info = None  # info = self.comm(command, SEND)
+                arg = command.split(':')
+                if arg[0] == "MOV":
+                    temp = arg[1].split(',')
+                    pos = [0.0,0.0,0.0]
+                    for i in range(3): pos[i] = float(temp[i])
+                    self.comm.waitMove(pos, self.camera.angle)
+                    pos = self.region.reach(pos)
+                    angle = self.camera.reach(self.camera.angle)
+                    arrive = self.comm.waitMove(pos, angle, "Default mode auto movement...")
+                    if arrive:
+                        self.region.setCenter(pos)
+                        self.camera.setCenter(angle)
+
                 self.log.info('EXECUTE ' + command)
-                if not info:
-                    self.log.error('Fail to communicate with mobile station')
-                    # return
-                else:
-                    self.log.info(command + ' is executed')
 
     # thread center used to control each mode to restart or terminate
     def modeCenter(self, args=None):
         while True:
             if sum(self.gui.CORNER) == 4:
                 time.sleep(1.0)
-                self.anchorMatrix(self.comm.clients[0].homelocation)
+                self.anchorMatrix()
                 self.log.info('All four corners have been recorded.')
-                self.gui.CORNER = 0
+                self.gui.CORNER = [100.0,0.0,0.0,0.0]
             if self.gui.suspend is True:
                 # suspend the plane
                 if self.visitList[self.MODE].isAlive():
@@ -245,32 +269,4 @@ class UAV:
 
 
 if __name__ == '__main__':
-    # uav = UAV()
-    '''
-    pos = [[],[],[],[]]
-    pos[0]=[3442395.688885,3.500000,13473033.072347]
-    pos[1]=[3442397.485786,3.700000,13473038.478324]
-    pos[2]=[3442389.651855,3.500000,13473041.002093]
-    pos[3]=[3442387.669069,3.700000,13473036.477345]
-    MATRIX = np.eye(4)
-    y_min, y_max = 1e+3, -1e+3
-    for i in range(4):
-        y_min, y_max = min([y_min, HOLD_RATE * pos[i][1]]), max([y_max, HOLD_RATE * pos[i][1]])
-
-    MATRIX[1, 1] = 1.0 * SR_HEIGHT / max([1e-2, (y_max - y_min)])
-    MATRIX[1, 3] = -y_min * SR_HEIGHT / max([1e-2, (y_max - y_min)])  # matrix for height
-
-    dx0, dz0 = pos[0][0] - pos[3][0], pos[0][2] - pos[3][2]
-    dx2, dz2 = pos[2][0] - pos[3][0], pos[2][2] - pos[3][2]
-
-    MATRIX[0, 0], MATRIX[0, 2], MATRIX[0, 3] = \
-        dx0 / SR_LENGTH, dx2 / SR_WIDTH, dx2 / 2 + pos[3][0]
-    MATRIX[2, 0], MATRIX[2, 2], MATRIX[2, 3] = \
-        dz0 / SR_LENGTH, dz2 / SR_WIDTH, dz2 / 2 + pos[3][2]
-
-    MATRIX = np.mat(MATRIX)
-    pos = [[4.0],[1.0],[0.0],[1.0]]
-    results = MATRIX*pos
-    print(results)
-    '''
-
+    uav = UAV()

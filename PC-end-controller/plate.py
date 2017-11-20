@@ -2,9 +2,7 @@ from Feature import *
 import threading
 import Region
 import Camera
-import cv2
-import time
-import os
+import cv2, time,os
 '''
 I.  You need to complete two functions: position, ideal
 II. In position(), you need to apply your algorithm, if no result or no existence, you should append
@@ -25,8 +23,8 @@ NUM_THREADS = 1 # specialize for plate since written in another language, no dir
 class Plate(feature):
     def __init__(self,name='plate',num_threads=3,position=[0.0,0.0,0.0], log=None):
         feature.__init__(self, num_threads, \
-                         Region.region(position=position, tar_pos=[-1.0,0.5,0.0], radius=[0.1,0.1,0.1]), \
-                         Camera.camera(angle=[0.0,0.0]), name, log)
+                         Region.region(position=position, tar_pos=[-0.7,3.0,-0.0], radius=[0.1,0.1,0.1]), \
+                         Camera.camera(angle=[70.0,0.0]), name, log)
         self.ret.name=name
         self.num_threads=3
         self.log=log

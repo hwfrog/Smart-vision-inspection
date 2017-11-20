@@ -4,36 +4,64 @@ from PIL import ImageTk, Image
 import scipy.misc
 import numpy as np
 import logging, time, os
-import cv2
+import cv2,math
+from parameters import *
 from _openssl import *
 
 class communication(Factory):
     matrix = None
     log = None
+    UAV = None
     # wait until the UAV move to specific position (format pos:[0.0,0.0,0.0], angle:[0.0,0.0])
-    def waitMove(self, pos, angle, info=None):
+    def waitMove(self, ori_pos, angle, info=None):
         if self.matrix is None:
             self.log.info('Init the matrix before further process!')
             return None
 
-        temp_pos = np.zeros((4,1))
-        for i in range(3):temp_pos[i][0]=pos[i]
-        temp_pos[3][0] = 1.0
+        # calculate mid-point
+        pos = []
+        for i in range(3):pos.append(ori_pos[i])
+        if pos[0]<=self.UAV.region.cubePoint[0][0]: pos[0] -= 1.0
+        elif pos[0]>self.UAV.region.cubePoint[1][0]: pos[0] += 1.0
+        elif pos[2]<self.UAV.region.cubePoint[0][2]: pos[2] -= 1.0
+        elif pos[2]>self.UAV.region.cubePoint[1][2]: pos[2] += 1.0
+        mid_target = np.zeros((4, 1))
+        for i in range(3): mid_target[i][0] = pos[i]
+        mid_target[3][0] = 1.0
+        mid_target=self.matrix*mid_target
+        mid_target = mid_target.getA()
 
-        target = self.matrix*temp_pos
-
+        # calculate target position
+        target = np.zeros((4,1))
+        for i in range(3): target[i][0]=ori_pos[i]
+        target[3][0] = 1.0
+        target = self.matrix*target
+        target = target.getA()
         # here target has the same coordinate system with UAV
-        # here target has the same coordinate system with UAV
-        for client in self.clients:
-            client.iswping = True
-        client.transport.write(
-            "wp:" + str(target[0][0]) + ":" + str(target[1][0]) + ":" + str(target[2][0]) + ":" + str(
-                angle[0][0]) + ":" + str(angle[1][0]))
-        while client.iswping:
-            time.sleep(0.1)
 
-        time.sleep(1.0)
+        current_position = self.getPos()
+        move = [0,0,0]
+        for i in range(3): move[i] = target[i][0]-current_position[i]
+        move[0] = move[0] * LATITUDE_TO_METER
+        move[2] = move[2] * LONGITUDE_TO_METER
+
+        for client in self.clients:client.iswping = True
+        message =  "wp:" + str(target[0][0]) + ":" + str(target[1][0]) + ":" + str(target[2][0]) + ":" + str(
+                angle[0]) + ":" + str(angle[1])+":"+str(mid_target[0][0])+":"+str(mid_target[2][0])
+
+        self.log.info(self.printMove(move))
+        client.transport.write(message.encode('ascii'))
+        while client.iswping is True: time.sleep(0.1)
         return True
+
+    def printMove(self, pos):
+        if pos[0] > 0: string = "MOVE: to north " + str(round(pos[0],2)) + " meters, "
+        elif pos[0] < 0: string = "MOVE: to south " + str(round(-pos[0],2)) + " meters, "
+        if pos[2] > 0: string += "east " + str(round(pos[2],2)) + " meters, "
+        elif pos[2] < 0: string += "west " + str(round(-pos[2],2)) + " meters, "
+        if pos[1] > 0: string += "up " + str(round(pos[1],2)) + " meters."
+        elif pos[1] < 0: string += "down " + str(round(-pos[1],2)) + " meters."
+        return string
 
     # wait until image is received
     def waitImage(self, compression):
@@ -52,31 +80,16 @@ class communication(Factory):
         cv2.imwrite("./modules/plate/resources/image/plate.jpg",img)
         return img
 
-    def getInitPos(self):
-        for client in self.clients:
-            client.homelocation = None
-            # client.transport.protocol.write(b'getp:0:0:0:0:0')
-            client.transport.write('getp:0:0:0:0:0'.encode('ascii'))
-            # while not client.homelocation: time.sleep(0.1)
-            pos = client.homelocation
-        # return pos
-        return [0.0,0.0,0.0]
-
-    # wait until position is returned (here you need to give value to pos)
     def getPos(self):
-        if self.matrix is None:
-            self.log.info('Init the matrix before further process!')
-            return None
-
+        for client in self.clients: client.iswping = True
         for client in self.clients:
-            client.homelocation = None
-            client.transport.write("getp:0:0:0:0:0")
-            while not client.homelocation:
-                time.sleep(0.1)
-            pos = client.homelocation
-
-        pos = self.matrix.I*pos
-        return pos
+            client.homelocation = []
+            message = 'pos:LF:0:0:0:0'
+            client.transport.write(message.encode('ascii'))
+            while client.iswping is True: time.sleep(0.1)
+        # return pos
+        for client in self.clients: client.iswping = True
+        return self.clients[0].homelocation[0]
 
     # check whether the communication is usable
     def checkComm(self):
@@ -115,9 +128,10 @@ class communication(Factory):
         for client in self.clients:
             client.transport.write(sentence)
 
-    def setMatrix(self, matrix):
+    def setMatrix(self, matrix, UAV):
         assert (matrix is not None)
         self.matrix = matrix
+        self.UAV = UAV
 
 
 class communication_client(Protocol):
@@ -156,6 +170,7 @@ class communication_client(Protocol):
                     msg = self.name + ": " + Name + "\n" + Content
                 elif Type == "pos":
                     self.homelocation.append([float(Name), float(Content), float(content2)])
+                    self.iswping = False
                 elif Type == "cmd":
                     if Name == "close":
                         if Content in self.images:

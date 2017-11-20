@@ -9,9 +9,6 @@ class camera:
         self.transformMatrix=None
         # self.comm.setangle()
 
-    def getPosition(self):
-        pass
-
     def setTarget(self, tar_angle):
         self.tar_angle = tar_angle
 
@@ -19,8 +16,8 @@ class camera:
         self.angle = angle
 
     # reach
-    def reach(self, tar_pos=[0.0,0.0]):
-        return [0.0,0.0]
+    def reach(self, pos):
+        return pos
 
     def getRandomAngle(self):
         return [np.random.random()*180.0, np.random.random()*(0.0-90.0)]

@@ -19,6 +19,13 @@ class safeRegion:
                 for k in range(2):
                     self.vertices.append([self.cubePoint[i][0], self.cubePoint[j][1], self.cubePoint[k][2]])
 
+    def inregion(self, pos):
+        count = 0
+        for i in range(3):
+            if pos[i]>self.cubePoint[0][i] and pos[i]<self.cubePoint[1][i]: count += 1
+        if count == 3: return True
+        else: return False
+
     # if avoid safeRegion successfully, return True
     def avoidRegion(self, pos1, pos2):
         ret1, ret2 = 0, 0
@@ -143,6 +150,9 @@ class region(safeRegion):
             self.radius = radius
 
     def setTarget(self, pos):
+        if self.inregion(pos) is True:
+            self.log.error("The target position is in the safe region")
+            return
         self.tar_pos=pos
 
     # return the should-be target position if want to go to tar_position

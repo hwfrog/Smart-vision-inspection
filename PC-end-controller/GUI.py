@@ -44,6 +44,8 @@ class GUI(Frame):
 
         self.image = PanedWindow(self.up, orient=HORIZONTAL)
         self.up.add(self.image, width=3 * UNIT_WID, height=2 * UNIT_HEI)
+        self.centerImage = Label(self.image,anchor=CENTER)
+        self.image.add(self.centerImage, width=3*UNIT_WID, height=2*UNIT_HEI)
         self.up.add(Label(self.up, bg='gray'), width=LINE_WID)
         labels = PanedWindow(self.up, orient=HORIZONTAL)
         self.up.add(labels, width=2 * UNIT_WID, height=2 * UNIT_HEI)
@@ -145,13 +147,23 @@ class GUI(Frame):
 
     # called every 200ms so that it can be updated in main thread
     info = ''
+    imageQueue = []
+    centerImageQueue = []
     def processInfo(self):
         self.loginfo.set(self.info)
-        self.messageInfo = self.command.get('1.0', END)
-        self.messageInfo = self.messageInfo[:-1]
+        # self.messageInfo = self.command.get('1.0', END)
+        # self.messageInfo = self.messageInfo[:-1]
+
+        if len(self.imageQueue) > 0:
+            image, name = self.imageQueue.pop(-1)
+            self.showImage(image, name)
+
+        if len(self.centerImageQueue) > 0:
+            image = self.centerImageQueue.pop(-1)
+            self.showImage(image, "center")
+
 
     LOG_INFO = ['\n' for i in range(LOGINFO_LINE_LIMIT)]
-
     def insertLogInfo(self, string):
         self.LOG_INFO.append(string)
         if len(self.LOG_INFO) > LOGINFO_LINE_LIMIT: self.LOG_INFO.pop(0)
@@ -226,6 +238,7 @@ class GUI(Frame):
     # show image in the ith structure (if image is None, clean all the image)
     num_images = 0
     all_images = 0
+    show_image = None
     temp_images=[]
     def showImage(self, image, name):
         if image is None:
@@ -252,7 +265,13 @@ class GUI(Frame):
             width = UNIT_WID
             height*=UNIT_WID/width
         width, height = int(width), int(height)
-        self.temp_images.append(ImageTk.PhotoImage(temp_image.resize((width, height))))
+        time.sleep(0.1)
+        if name == "center":
+            self.show_image = ImageTk.PhotoImage(temp_image.resize((int(width*2.5), int(height*1.6))))
+            self.centerImage.config(image = self.show_image)
+            return
+        self.show_image = ImageTk.PhotoImage(temp_image.resize((width, height)))
+        self.temp_images.append(self.show_image)
 
         self.result_images[self.num_images].config(image=self.temp_images[-1])
         self.num_images+=1
